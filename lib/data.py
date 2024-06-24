@@ -6,6 +6,7 @@ import torch
 import os
 # os.environ["HF_DATASETS_OFFLINE"] = "1"
 from datasets import load_dataset
+from requests.exceptions import ProxyError
 
 
 
@@ -23,7 +24,8 @@ class TokenizerWrapper:
 def get_wikitext2(nsamples, seed, seqlen, tokenizer):
     # Load train and test datasets
     # traindata = load_dataset('wikitext', 'wikitext-2-raw-v1', split='train')
-    testdata = load_dataset('wikitext', 'wikitext-2-raw-v1', split='test')
+    # testdata = load_dataset('wikitext', 'wikitext-2-raw-v1', split='test')
+    testdata = load_dataset('wikitext-2-raw-v1', split='test')
 
     # Encode datasets
     # trainenc = tokenizer(" ".join(traindata['text']), return_tensors='pt')
@@ -55,7 +57,8 @@ def get_ptb(nsamples, seed, seqlen, tokenizer):
     return trainloader, testenc
 
 def get_pile(nsamples, seed, seqlen, tokenizer):
-    dataset = load_dataset("../mit-han-lab/pile-val-backup", split="validation")
+    # dataset = load_dataset("../mit-han-lab/pile-val-backup", split="validation")
+    dataset = load_dataset("pile-val-backup", split="validation")
     dataset = dataset.shuffle(seed=seed)
     samples = []
     n_run = 0
