@@ -55,7 +55,7 @@ def find_layers(module, layers=[nn.Linear], name=''):
 def check_sparsity(args, model):
     use_cache = model.config.use_cache
     model.config.use_cache = False
-    layers=[]
+    layers = []
     print(args.model)
     if "llama" in args.model:
         layers = model.model.layers
@@ -178,7 +178,7 @@ def prune_magnitude(args, model, tokenizer, device=torch.device("cuda:0"), prune
             subset[name].weight.data[W_mask] = 0
 
 
-def prune_ria(args, model, tokenizer, device=torch.device("cuda:0"), prune_n=0, prune_m=0):
+def prune_ria(args, model, tokenizer, device=torch.device("cuda:0"), prune_n=0, prune_m=0, skip_layer=0):
     use_cache = model.config.use_cache
     model.config.use_cache = False
     print("loading calibdation data")
@@ -186,7 +186,7 @@ def prune_ria(args, model, tokenizer, device=torch.device("cuda:0"), prune_n=0, 
     dataloader, _ = get_loaders(args.calib_dataset, nsamples=args.nsamples, seed=args.seed, seqlen=args.seqlen,
                                 tokenizer=tokenizer)
     print("dataset loading complete")
-    layers=[]
+    layers = []
     with torch.no_grad():
         if "llama" in args.model:
             inps, outs, attention_mask, position_ids = prepare_calibration_input(args, model, dataloader, device)
@@ -232,8 +232,24 @@ def prune_ria(args, model, tokenizer, device=torch.device("cuda:0"), prune_n=0, 
 
         for h in handles:
             h.remove()
-
+        if i >= skip_layer:
+            for j in range(args.nsamples):
+                with torch.no_grad():
+                    if "llama" in args.model:
+                        outs[j] = layer(inps[j].unsqueeze(0), attention_mask=attention_mask, position_ids=position_ids)[
+                            0]
+                    elif "opt" in args.model:
+                        outs[j] = layer(inps[j].unsqueeze(0), attention_mask=attention_mask)[0]
+            inps, outs = outs, inps
+            model.config.use_cache = use_cache
+            torch.cuda.empty_cache()
+            continue
         for name in subset:
+            # if (i == 3 and name != "self_attn.q_proj" and name != "self_attn.k_proj" and name != "self_attn.v_proj" and name != "self_attn.o_proj"
+            #         # and name != "mlp.gate_proj"):
+            #         # and name != "mlp.gate_proj" and name != "mlp.up_proj" ):
+            #         and name != "mlp.gate_proj" and name != "mlp.up_proj" and name != "mlp.down_proj"):
+            #     continue
             if args.gptq:
                 print('Quantizing ...')
                 wrapped_layers[name].fasterquant(
@@ -246,8 +262,10 @@ def prune_ria(args, model, tokenizer, device=torch.device("cuda:0"), prune_n=0, 
             if args.prune_method == "wanda":
                 W_metric = torch.abs(W) * torch.sqrt(wrapped_layers[name].scaler_row.reshape((1, -1)))
             elif args.prune_method == "ria":
-                W_metric = ((torch.abs(W) / torch.sum(torch.abs(W), dim=0) + torch.abs(W) / torch.sum(torch.abs(W),dim=1).reshape(-1,1)) *
-                            (torch.sqrt(wrapped_layers[name].scaler_row.reshape((1, -1)))) ** args.a)
+                W_metric = ((torch.abs(W) / torch.sum(torch.abs(W), dim=0) + torch.abs(W) / torch.sum(torch.abs(W),
+                                                                                                      dim=1).reshape(-1,
+                                                                                                                     1))
+                            * (torch.sqrt(wrapped_layers[name].scaler_row.reshape((1, -1)))) ** args.a)
             # 掩码全为0
             W_mask = (torch.zeros_like(W_metric) == 1)  ## initialize a mask to be all False
             if prune_n != 0:
@@ -346,10 +364,10 @@ def prune_ria(args, model, tokenizer, device=torch.device("cuda:0"), prune_n=0, 
                                 block_columns = block_columns[columns_mask]
 
                                 strip_idx[:, :, 0] = (rows * prune_m).reshape(1, -1) + lsa_column
-                                strip_idx[:, :, 1:] = block_columns.reshape(1, 1, -1) + torch.arange(row * num_parallel,
-                                                                                                     (
-                                                                                                             row + 1) * num_parallel).reshape(
-                                    -1, 1, 1).to(device) * prune_m
+                                strip_idx[:, :, 1:] = (block_columns.reshape(1, 1, -1) +
+                                                       torch.arange(row * num_parallel,
+                                                                    (row + 1) * num_parallel).reshape(-1, 1, 1).to(
+                                                           device) * prune_m)
 
                                 tmp = W_metric[:, strip_idx].transpose(1, 0).transpose(2, 1)
 
